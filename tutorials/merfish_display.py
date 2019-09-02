@@ -6,6 +6,11 @@ import panel.widgets as pnw
 import numpy as np
 import pandas as pd
 from scipy.stats import linregress, pearsonr
+import zarr
+from pathlib import Path
+from holoviews.operation.datashader import regrid
+from imaxt_image.image import zscale
+
 
 
 class Catalogue(param.Parameterized):
@@ -85,3 +90,27 @@ class Catalogue(param.Parameterized):
         res = pn.Column(self.param, self.view)
         return res
         
+class ImageViewer:
+    def __init__(self, path):
+        self.path = Path(path)
+        self.arr = zarr.open(path + '/zarr')
+        
+    def load_image(self, plane, channel, cycle, fov):
+        g = [*self.arr[f'fov={fov}/z={plane}/cycle={cycle}'].groups()]
+        g.sort()
+        im1 = g[channel][1]['raw'][:]
+        vmin, vmax = zscale(im1)
+        im1 = im1.clip(vmin, vmax)
+        im1 = hv.Image(im1, bounds=(0, 0, 2048, 2048), vdims='Intensity')
+        return im1
+
+    def display(self):
+        # Define DynamicMap with z-dimension to slide through
+        image_stack = hv.DynamicMap(self.load_image, kdims=['plane', 'channel', 'cycle', 'fov'])
+
+
+        # Apply regridding in case data is large and set a global Intensity range 
+        regridded = regrid(image_stack).redim.range(plane=(0,self.arr.attrs['planes']-1), channel=(0,2), cycle=(0,self.arr.attrs['cycles']-1), fov=(0,self.arr.attrs['fov']-1)) #+ hist_stack.redim.range(z=(0,3), c=(0,3))
+        display_obj = regridded.opts(plot={'Image': dict(width=700, height=700, colorbar=False, 
+                                                         xaxis=None, yaxis=None, aspect='equal')})
+        return display_obj
